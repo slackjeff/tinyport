@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Autor Jefferson Carneiro <jeffersoncarneiro@slackjeff.com.br>
+# Changelog
+
+######################################
+# Global VAR
+######################################
+globalDir='/usr/ports'
+
+#Suport unicode OFF
+export LANG='C'
+export LC_ALL='C'
+
+# Checks
+[ "$UID" -ne 0 ] && { printf '%s\n' "Only root."; exit 1 ;}
+
+for x in 'git'; do
+    if ! type -P "$x" 1>/dev/null 2>/dev/null; then
+        printf '%s\n' "$x not installed."
+        exit 1
+    fi
+done
+
+#############################
+# Functions
+#############################
+_usage() {
+    echo "
+tinyport
+
+  create  - Criar sistema de portas
+  update  - Atualizar as portas
+  search  - Procurar uma porta
+  build   - Baixar código fonte e executar Slackbuilds
+  clean   - Remover códigos fontes globais
+"
+}
+
+_die(){ printf '%b\n' "\e[31;1m$@\e[m"; exit 1 ;}
+
+_create(){ ! [ -d  "$globalDir" ] && git clone 'https://github.com/Ponce/slackbuilds' $globalDir ;}
+
+_update(){ git pull origin current ;}
+
+_clean(){ find . -name '*.tar.*' -exec rm -v {} \; ;printf '%b\n' "\e[32;1mAll Sources cleaned $globalDir\e[m" ;}
+
+_checkInfo(){
+    PKG="$@" # All args.
+
+    checkPkg=$(find . -name "$PKG" | sed 's|^\.\/||g')
+    [ -z "$checkPkg" ] && _die "PKG Not found in ports"
+
+    cd $checkPkg
+    # Load archive '.info'
+    . $(basename ${checkPkg}.info)
+}
+
+_build(){
+    PKG="$@"
+
+    _checkInfo "$PKG"
+    if [ $(uname -m) = 'x86_64' ] && [ -n "$DOWNLOAD_x86_64" ]; then
+        wget --progress=bar $DOWNLOAD_x86_64 || die "Error Download"
+        [ $(md5sum $(basename ${DOWNLOAD_x86_64}) | cut -d ' ' -f 1) = "$MD5SUM" ] || die "Hash md5 different."
+        bash $PRGNAM.SlackBuild || exit 1
+        installpkg /tmp/${PRGNAM}-*SBo.t?z
+
+    else
+        wget --progress=bar $DOWNLOAD || die "Error Download."
+        [ $(md5sum $(basename ${DOWNLOAD}) | cut -d ' ' -f 1) = "$MD5SUM" ] || die "Hash md5 different."
+        bash $PRGNAM.SlackBuild || exit 1
+        installpkg /tmp/${PRGNAM}-*SBo.t?z
+    fi
+
+}
+
+_search(){
+    PKG="$@" # All args.
+
+    _checkInfo "$PKG"
+
+    printf '%s\n' "Local:    $checkPkg"
+    if [ -n "$REQUIRES" ]; then
+        printf '%s\n' "REQUIRES: "
+        for dep in $REQUIRES; do
+            checkPkgExist=$(find /var/log/packages/ -name "${dep}-*")
+            if [ -z "$checkPkgExist" ]; then
+                printf '%b\n' "\e[31;1m$dep\e[m"
+            else
+                printf '%b\n' "\e[32;1m$dep\e[m"
+            fi
+        done
+    else
+        printf '%b\n' "\e[31;1mDEPENDS:\e[m  NONE"
+    fi
+}
+
+# No args
+[ $# -eq '0' ] && _usage
+
+# Change directory
+[ -d "$globalDir" ] && cd "$globalDir" || _die "Create ports, use: $0 create"
+
+# Main
+case $1 in
+   create) _create ;;
+   update) _update ;;
+   search) shift; _search "$@" ;;
+   build) shift; _build "$@" ;;
+   clean) _clean ;;
+esac
